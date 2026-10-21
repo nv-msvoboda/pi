@@ -91,6 +91,33 @@ describe("isContextOverflow", () => {
 		expect(isContextOverflow(message, 131072)).toBe(true);
 	});
 
+	it.each([
+		"litellm.ContextWindowExceededError: input exceeds model limit",
+		"litellm.BadRequestError: litellm._pre_call_checks: Context Window exceeded for given call.",
+		`400: ${JSON.stringify({
+			message:
+				"litellm.ContextWindowExceededError: litellm.BadRequestError: litellm._pre_call_checks: Context Window exceeded for given call. No models have context window large enough for this call.\nModel=vertex_ai/gemini-4-argon, Max Input Tokens=1048576, Got=1050306\nmodel=gcp/google/gemini-4-argon. context_window_fallbacks=None. fallbacks=None.\n\nSet 'context_window_fallback' - https://docs.litellm.ai/docs/routing#fallbacks\n\nLiteLLM: model group 'gcp/google/gemini-4-argon' failed with the error above. No fallback was attempted.",
+			type: "invalid_request_error",
+			param: null,
+			code: "400",
+		})}`,
+	])("detects LiteLLM pre-call context overflow: %s", (errorMessage) => {
+		const message = createErrorMessage(errorMessage, "custom-gateway");
+		// A rejected request has zero usage, so recovery must recognize the error text.
+		expect(isContextOverflow(message)).toBe(true);
+		expect(isContextOverflow(message, 1_048_576)).toBe(true);
+		expect(isContextOverflow({ ...message, stopReason: "aborted" })).toBe(false);
+		expect(isContextOverflow({ ...message, stopReason: "stop" })).toBe(false);
+	});
+
+	it.each([
+		"litellm.BadRequestError: invalid model configuration",
+		"litellm.BadRequestError: Context window must be a positive integer",
+		"litellm.RateLimitError: Rate limit exceeded for given call",
+	])("does not mistake unrelated LiteLLM errors for context overflow: %s", (errorMessage) => {
+		expect(isContextOverflow(createErrorMessage(errorMessage))).toBe(false);
+	});
+
 	it("detects OpenAI-compatible parenthesized maximum context length errors", () => {
 		const message = createErrorMessage(
 			"Error: 400 Input length (265330) exceeds model's maximum context length (262144).",
